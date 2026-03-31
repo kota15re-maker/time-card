@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>趣味の出退勤ログ</title>
+    <style>
+        /* レイアウト設定 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr 1.5fr; /* 左:中:右 の幅比率 */
+            grid-template-rows: 1fr 1fr;           /* 左側を2段にするため */
+            gap: 15px;
+            width: 95%;
+            max-width: 600px;
+            height: 350px;
+        }
+
+        /* 共通ボタンスタイル */
+        button {
+            border: none;
+            border-radius: 16px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.1s, opacity 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        button:active { transform: translateY(2px); }
+        button:disabled {
+            background-color: #ccc !important;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* 個別ボタン設定 */
+        .btn-wakeup { background-color: #ff9800; grid-row: 1; grid-column: 1; font-size: 1rem; }
+        .btn-return { background-color: #9c27b0; grid-row: 2; grid-column: 1; font-size: 1rem; }
+        .btn-start { background-color: #28a745; grid-row: 1 / 3; grid-column: 2; font-size: 1.8rem; }
+        .btn-end { background-color: #dc3545; grid-row: 1 / 3; grid-column: 3; font-size: 1.8rem; }
+
+        .status-area {
+            margin-top: 30px;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 500px;
+            text-align: center;
+            color: #555;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <button id="wakeup" class="btn-wakeup" onclick="handleAction('起床')">起床<br>(休日★)</button>
+        <button id="return" class="btn-return" onclick="handleAction('帰宅')">帰宅<br>(仕事)</button>
+        
+        <button id="start" class="btn-start" onclick="handleAction('開始')">開始</button>
+        
+        <button id="end" class="btn-end" onclick="handleAction('終了')" disabled>終了</button>
+    </div>
+
+    <div id="status" class="status-area">
+        待機中... おはようございます！
+    </div>
+
+    <script>
+        /**********************************************************
+         * 【ここを書き換えてください！】
+         * Google Apps Scriptでデプロイした「ウェブアプリURL」を貼り付けます
+         **********************************************************/
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyTpzPNdDPI8Rxl672aUCP-mRBFgnUESQnJ8zSX3WU2QUZ8fr0KMrMzHmZKcujukWYn/exec";
+
+        // 状態の管理（ブラウザに保存して日を跨いでも大丈夫なようにする）
+        let state = JSON.parse(localStorage.getItem('work_log_state')) || {
+            step: 'idle', // idle(初期), prepped(支度済), started(作業中)
+            setupTime: null,
+            startTime: null,
+            isHoliday: ""
+        };
+
+        function saveState() {
+            localStorage.setItem('work_log_state', JSON.stringify(state));
+        }
+
+        // 画面（ボタンの活性・非活性）の更新
+        function updateView() {
+            document.getElementById('wakeup').disabled = state.step !== 'idle';
+            document.getElementById('return').disabled = state.step !== 'idle';
+            document.getElementById('start').disabled = state.step !== 'prepped';
+            document.getElementById('end').disabled = state.step !== 'started';
+        }
+
+        function formatTime(dateObj) {
+            if(!dateObj) return "";
+            const d = new Date(dateObj);
+            return d.getHours() + ":" + String(d.getMinutes()).padStart(2, '0') + ":" + String(d.getSeconds()).padStart(2, '0');
+        }
+
+        function diffMinutes(start, end) {
+            const diff = new Date(end) - new Date(start);
+            return Math.floor(diff / (1000 * 60)) + "分";
+        }
+
+        // ボタンが押された時の処理
+        function handleAction(type) {
+            const now = new Date();
+
+            if (type === '起床' || type === '帰宅') {
+                state.setupTime = now;
+                state.isHoliday = (type === '起床') ? "★" : "";
+                state.step = 'prepped';
+                document.getElementById('status').innerText = `${type}記録: ${formatTime(now)} (開始ボタンを押してください)`;
+            } 
+            else if (type === '開始') {
+                state.startTime = now;
+                state.step = 'started';
+                document.getElementById('status').innerText = `作業中... (開始時刻: ${formatTime(now)})`;
+            } 
+            else if (type === '終了') {
+                const endTime = now;
+                document.getElementById('status').innerText = "送信中...";
+
+                const payload = {
+                    date: new Date(state.startTime).toLocaleDateString('ja-JP'), // 開始日の日付
+                    isHoliday: state.isHoliday,
+                    prepTime: diffMinutes(state.setupTime, state.startTime),
+                    workTime: diffMinutes(state.startTime, endTime),
+                    setupTime: formatTime(state.setupTime),
+                    startTime: formatTime(state.startTime),
+                    endTime: formatTime(endTime)
+                };
+
+                fetch(GAS_URL, {
+                    method: "POST",
+                    mode: "no-cors",
+                    body: JSON.stringify(payload)
+                }).then(() => {
+                    document.getElementById('status').innerText = "完了！スプレッドシートに記録しました。";
+                }).catch(e => {
+                    alert("送信エラー: " + e);
+                    document.getElementById('status').innerText = "エラーが発生しました。";
+                });
+
+                // 状態リセット
+                state = { step: 'idle', setupTime: null, startTime: null, isHoliday: "" };
+            }
+            
+            saveState();
+            updateView();
+        }
+
+        // ページ読み込み時に状態を反映
+        updateView();
+    </script>
+</body>
+</html>
